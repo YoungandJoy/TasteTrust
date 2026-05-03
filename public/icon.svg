@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#fef3c7"/>
+  <path d="M256 90 L96 160 v160 l160 90 160-90 V160 z m0 32 l122 53 -122 53 -122-53 z" fill="#C9A84C"/>
+  <text x="256" y="380" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="64" font-weight="700" fill="#78350f">TT</text>
+</svg>
