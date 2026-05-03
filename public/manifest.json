@@ -1,0 +1,19 @@
+{
+  "name": "TasteTrust — Verified by Gayoen",
+  "short_name": "TasteTrust",
+  "description": "A verified restaurant curation web app — every place personally visited and vetted by Gayoen. Singapore, Johor Bahru, Los Angeles.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fafaf9",
+  "theme_color": "#C9A84C",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
