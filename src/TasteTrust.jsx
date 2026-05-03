@@ -1,55 +1,27 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Search,
   MapPin,
   Star,
-  Dog,
-  Volume2,
-  Car,
-  Leaf,
   ShieldCheck,
-  Eye,
-  CalendarDays,
-  Filter,
   ExternalLink,
+  ArrowUpDown,
+  X,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
 
 // =====================================================================
-//  PLACES — TasteTrust verified restaurant data
+//  TasteTrust — verified restaurant curation, by Gayoen.
 //  ---------------------------------------------------------------------
-//  Curated and verified by Gi-yeon. Originally focused on the US, now
-//  expanding to cover Singapore / Johor Bahru / LA based on Gi-yeon's
-//  shared Google Maps lists (한식, Restaurant, Cafe, Singapore, 일식,
-//  Chinese). Records seeded from Google Maps; per-record fields like
-//  giyeonNote, visitDate, dog policy, parking and vegan option must be
-//  filled in manually after a real visit.
+//  Mobile-first. Region-first navigation (Singapore / Johor Bahru / LA).
+//  Cuisine filter pills within a region. Cards show only what we
+//  actually have data for — no "Awaiting note" placeholder.
 //
-//  Schema (every record gets DEFAULTS applied via place()):
-//    id              : stable string id
-//    name            : restaurant name
-//    category        : cuisine / format (e.g. "Korean BBQ", "Cafe")
-//    neighborhood    : "Area, City" — left blank when not visible
-//    rating          : 0–5, Google Maps score (replace with verified
-//                      score after a real visit)
-//    priceLevel      : "$" | "$$" | "$$$" | "$$$$"
-//    filters         : { dogFriendly, noiseLevel, parking, veganOption }
-//                      noiseLevel: "quiet" | "moderate" | "loud"
-//    giyeonNote      : one-line first-person recommendation
-//    visitDate       : "YYYY-MM" of last verified visit
-//    image           : remote image URL (Unsplash placeholder ok)
-//    verifiedVisits  : counter — bumped daily by ops script
-//    analytics       : { monthlyViews, adClicks, conversions, couponsUsed }
-//    sourceUrl       : original Google Maps link
-//    listSource      : which curated list this came from
+//  PLACES schema (every record gets DEFAULTS applied via place()):
+//    id, name, category, neighborhood, rating, priceLevel,
+//    filters {dogFriendly, noiseLevel, parking, veganOption},
+//    gayoenNote, visitDate, image, verifiedVisits,
+//    analytics {monthlyViews, adClicks, conversions, couponsUsed},
+//    sourceUrl, listSource
 // =====================================================================
 
 const DEFAULTS = {
@@ -60,16 +32,11 @@ const DEFAULTS = {
     parking: false,
     veganOption: false,
   },
-  giyeonNote: "",
+  gayoenNote: "",
   visitDate: "",
   image: "",
   verifiedVisits: 0,
-  analytics: {
-    monthlyViews: 0,
-    adClicks: 0,
-    conversions: 0,
-    couponsUsed: 0,
-  },
+  analytics: { monthlyViews: 0, adClicks: 0, conversions: 0, couponsUsed: 0 },
   sourceUrl: "",
   listSource: "",
 };
@@ -81,7 +48,7 @@ const place = (o) => ({
   analytics: { ...DEFAULTS.analytics, ...(o.analytics || {}) },
 });
 
-// Source URLs (Google Maps shared lists)
+// Source URLs (Google Maps shared lists owned by Gayoen)
 const SRC = {
   korean: "https://maps.app.goo.gl/N4ibwRo1rNeg4DJV7",
   restaurant: "https://maps.app.goo.gl/3UaRat3mv2WzSbDK9",
@@ -212,363 +179,612 @@ const PLACES = [
   place({ id: "chn-13", name: "Sam Woo Village BBQ", category: "Chinese BBQ", neighborhood: "Los Angeles area", rating: 4.3, priceLevel: "$$", sourceUrl: SRC.chinese, listSource: "Chinese" }),
 ];
 
-// ---------- helpers ----------
-const NOISE_LABEL = {
-  quiet: "Quiet",
-  moderate: "Moderate",
-  loud: "Lively",
+// ===== NORMALIZATION HELPERS =====
+
+function getRegion(p) {
+  const n = (p.neighborhood || "").toLowerCase();
+  if (
+    n.includes("los angeles") ||
+    n.includes("hollywood") ||
+    n.includes("olympic")
+  )
+    return "Los Angeles";
+  if (
+    n.includes("johor") ||
+    n.includes("pelangi") ||
+    n.includes("taman") ||
+    n.includes("puteri") ||
+    n.includes("city square") ||
+    n.includes("r&f") ||
+    n.includes("zenith")
+  )
+    return "Johor Bahru";
+  if (n.includes("penang")) return "Penang";
+  if (n.includes("singapore") || n.includes("sentosa") || /\b(tanjong|telok|mandarin|orchard|clarke|raffles|beach road|keong saik|outram|alexandra|somerset|tang plaza|market street|katong|robertson|amoy|international plaza|tras|chinatown)\b/.test(n))
+    return "Singapore";
+  // Heuristic from listSource for entries with no neighborhood
+  if (
+    p.listSource === "한식" ||
+    p.listSource === "Restaurant" ||
+    p.listSource === "Cafe" ||
+    p.listSource === "Singapore" ||
+    p.listSource === "일식" ||
+    p.listSource === "Chinese"
+  )
+    return "Singapore";
+  return "Other";
+}
+
+function getCuisine(p) {
+  const c = (p.category || "").toLowerCase();
+  if (c.includes("korean")) return "Korean";
+  if (
+    c.includes("japanese") ||
+    c.includes("sushi") ||
+    c.includes("yakiniku") ||
+    c.includes("ramen") ||
+    c.includes("tonkatsu")
+  )
+    return "Japanese";
+  if (c.includes("italian") || c.includes("pizza")) return "Italian";
+  if (
+    c.includes("chinese") ||
+    c.includes("hot pot") ||
+    c.includes("hunan") ||
+    c.includes("cantonese") ||
+    c.includes("bak kwa") ||
+    c.includes("hot chicken") ||
+    c.includes("bao") ||
+    c.includes("dim sum")
+  )
+    return "Chinese";
+  if (c.includes("thai")) return "Thai";
+  if (
+    c.includes("singaporean") ||
+    c.includes("nyonya") ||
+    c.includes("teochew") ||
+    c.includes("kopitiam") ||
+    c.includes("hawker") ||
+    c.includes("porridge") ||
+    c.includes("food court") ||
+    c.includes("durian") ||
+    c.includes("laksa") ||
+    c.includes("bak kut teh")
+  )
+    return "Singaporean";
+  if (
+    c.includes("cafe") ||
+    c.includes("coffee") ||
+    c.includes("bakery") ||
+    c.includes("dessert") ||
+    c.includes("ice cream") ||
+    c.includes("board game")
+  )
+    return "Cafe";
+  if (c.includes("bar") || c.includes("lounge") || c.includes("gastropub"))
+    return "Bar";
+  if (c.includes("modern european") || c.includes("fine dining"))
+    return "Fine Dining";
+  if (c.includes("seafood")) return "Seafood";
+  return "Other";
+}
+
+// Cuisine metadata (gradient header + emoji)
+const CUISINES = {
+  Korean: { emoji: "🍖", grad: "from-rose-200 via-amber-100 to-amber-50" },
+  Japanese: { emoji: "🍣", grad: "from-rose-100 via-pink-50 to-stone-50" },
+  Italian: { emoji: "🍝", grad: "from-emerald-100 via-amber-50 to-rose-100" },
+  Chinese: { emoji: "🥡", grad: "from-red-200 via-amber-100 to-amber-50" },
+  Thai: { emoji: "🌶️", grad: "from-lime-100 via-amber-50 to-rose-100" },
+  Singaporean: { emoji: "🦐", grad: "from-teal-100 via-amber-50 to-amber-100" },
+  Cafe: { emoji: "☕", grad: "from-amber-100 via-amber-50 to-stone-50" },
+  Bar: { emoji: "🍷", grad: "from-purple-200 via-stone-100 to-stone-50" },
+  "Fine Dining": { emoji: "🍽️", grad: "from-stone-300 via-stone-100 to-stone-50" },
+  Seafood: { emoji: "🦞", grad: "from-sky-100 via-amber-50 to-amber-100" },
+  Other: { emoji: "🍴", grad: "from-stone-100 to-stone-50" },
 };
+
+const REGIONS = ["Singapore", "Johor Bahru", "Los Angeles"];
+
+const SORT_OPTIONS = [
+  { id: "rating", label: "★ Highest rated" },
+  { id: "price-asc", label: "$ → $$$$" },
+  { id: "price-desc", label: "$$$$ → $" },
+  { id: "name", label: "A → Z" },
+];
+
+const PRICE_TO_NUM = { "": 0, $: 1, $$: 2, $$$: 3, $$$$: 4 };
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
-// ---------- UI ----------
+// ===== UI =====
+
 function Header() {
   return (
     <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-stone-200">
-      <div className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
+      <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-6 h-6 text-amber-600" strokeWidth={2.2} />
+          <ShieldCheck className="w-5 h-5 text-amber-600" strokeWidth={2.4} />
           <div>
-            <div className="text-lg font-semibold tracking-tight text-stone-900">
+            <div className="text-base font-semibold tracking-tight text-stone-900 leading-none">
               TasteTrust
             </div>
-            <div className="text-[11px] text-stone-500 -mt-0.5">
-              Verified by Gi-yeon · Singapore · Johor Bahru · LA
+            <div className="text-[10px] text-stone-500 mt-0.5">
+              Verified by Gayoen
             </div>
           </div>
         </div>
-        <nav className="hidden md:flex items-center gap-6 text-sm text-stone-600">
-          <a className="hover:text-stone-900" href="#places">
-            Places
-          </a>
-          <a className="hover:text-stone-900" href="#about">
-            How verification works
-          </a>
-        </nav>
+        <div className="text-[11px] text-stone-500 hidden sm:block">
+          Singapore · Johor Bahru · Los Angeles
+        </div>
       </div>
     </header>
   );
 }
 
-function Hero() {
+function CityMap({ counts, currentRegion, setRegion }) {
+  // Decorative SVG showing 3 city pins on a stylized world map
+  const cities = [
+    { id: "Los Angeles", x: 90, y: 95, label: "LA" },
+    { id: "Johor Bahru", x: 510, y: 145, label: "JB" },
+    { id: "Singapore", x: 540, y: 165, label: "SG" },
+  ];
+
   return (
-    <section className="bg-gradient-to-b from-amber-50 to-white border-b border-stone-200">
-      <div className="max-w-6xl mx-auto px-5 py-12 md:py-16 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-white border border-amber-200 rounded-full text-xs font-medium text-amber-700 mb-5">
-          <ShieldCheck className="w-3.5 h-3.5" />
-          Every restaurant personally vetted
-        </div>
-        <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-stone-900 leading-tight">
-          The restaurants we&rsquo;d <em className="text-amber-700 not-italic">actually</em> send you to.
+    <div className="relative bg-gradient-to-b from-amber-50 to-white border-b border-stone-200">
+      <div className="max-w-5xl mx-auto px-4 pt-6 pb-4">
+        <svg
+          viewBox="0 0 640 220"
+          className="w-full h-32 sm:h-40"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient id="land" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor="#fef3c7" />
+              <stop offset="1" stopColor="#fde68a" />
+            </linearGradient>
+          </defs>
+          {/* North America blob */}
+          <path
+            d="M30,40 C60,20 130,30 160,80 C170,120 130,150 90,150 C40,150 10,100 30,40 Z"
+            fill="url(#land)"
+            opacity="0.55"
+          />
+          {/* Asia blob */}
+          <path
+            d="M380,40 C460,20 600,40 620,90 C625,140 580,180 510,180 C430,185 370,140 380,40 Z"
+            fill="url(#land)"
+            opacity="0.55"
+          />
+          {/* Pacific dots */}
+          {Array.from({ length: 30 }).map((_, i) => (
+            <circle
+              key={i}
+              cx={180 + ((i * 7) % 200)}
+              cy={70 + ((i * 11) % 110)}
+              r="1"
+              fill="#d6d3d1"
+              opacity="0.4"
+            />
+          ))}
+          {/* City pins */}
+          {cities.map((c) => {
+            const active = currentRegion === c.id;
+            return (
+              <g
+                key={c.id}
+                style={{ cursor: "pointer" }}
+                onClick={() => setRegion(active ? null : c.id)}
+              >
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r={active ? "18" : "10"}
+                  fill="#C9A84C"
+                  opacity={active ? "0.25" : "0.15"}
+                />
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r="6"
+                  fill={active ? "#92400e" : "#C9A84C"}
+                />
+                <text
+                  x={c.x}
+                  y={c.y - 14}
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="600"
+                  fill={active ? "#78350f" : "#57534e"}
+                >
+                  {c.label} · {counts[c.id] || 0}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        <h1 className="mt-1 text-2xl sm:text-3xl font-semibold tracking-tight text-stone-900 text-center">
+          Where Gayoen actually eats.
         </h1>
-        <p className="mt-4 text-stone-600 max-w-xl mx-auto">
-          A small, verified list of restaurants across Singapore, Johor Bahru
-          and LA — vetted in person, scored honestly, and tagged with what
-          actually matters.
+        <p className="mt-1.5 text-sm text-stone-600 text-center max-w-md mx-auto">
+          {PLACES.length} restaurants, personally visited and vetted across
+          three cities. Tap a pin or pick a city below.
         </p>
       </div>
-    </section>
+    </div>
   );
 }
 
-function FilterBar({ filters, setFilters, query, setQuery, listFilter, setListFilter, listOptions }) {
-  const toggle = (key) => setFilters((f) => ({ ...f, [key]: !f[key] }));
-
+function RegionTabs({ regions, current, setCurrent, counts }) {
   return (
-    <div className="max-w-6xl mx-auto px-5 mt-8">
-      <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <Search className="w-4 h-4 text-stone-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, neighborhood, cuisine…"
-            className="flex-1 bg-transparent outline-none text-sm placeholder:text-stone-400"
+    <div className="sticky top-[57px] z-20 bg-white/95 backdrop-blur border-b border-stone-200">
+      <div className="max-w-5xl mx-auto px-2 sm:px-4">
+        <div className="flex overflow-x-auto gap-1 py-2 -mx-2 px-2">
+          <RegionPill
+            label="All"
+            count={Object.values(counts).reduce((a, b) => a + b, 0)}
+            active={current === null}
+            onClick={() => setCurrent(null)}
           />
-          <Filter className="w-4 h-4 text-stone-400 hidden sm:block" />
-        </div>
-        <div className="flex flex-wrap gap-2 mt-3">
-          <button
-            onClick={() => setListFilter("all")}
-            className={classNames(
-              "text-xs px-3 py-1.5 rounded-full border transition",
-              listFilter === "all"
-                ? "bg-stone-900 text-white border-stone-900"
-                : "bg-white text-stone-700 border-stone-200 hover:border-stone-400"
-            )}
-          >
-            All lists
-          </button>
-          {listOptions.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setListFilter(opt)}
-              className={classNames(
-                "text-xs px-3 py-1.5 rounded-full border transition",
-                listFilter === opt
-                  ? "bg-stone-900 text-white border-stone-900"
-                  : "bg-white text-stone-700 border-stone-200 hover:border-stone-400"
-              )}
-            >
-              {opt}
-            </button>
+          {regions.map((r) => (
+            <RegionPill
+              key={r}
+              label={r}
+              count={counts[r] || 0}
+              active={current === r}
+              onClick={() => setCurrent(r)}
+            />
           ))}
-        </div>
-        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-stone-100">
-          <FilterChip
-            active={filters.dogFriendly}
-            onClick={() => toggle("dogFriendly")}
-            icon={<Dog className="w-3.5 h-3.5" />}
-            label="Dog-friendly"
-          />
-          <FilterChip
-            active={filters.parking}
-            onClick={() => toggle("parking")}
-            icon={<Car className="w-3.5 h-3.5" />}
-            label="Parking"
-          />
-          <FilterChip
-            active={filters.veganOption}
-            onClick={() => toggle("veganOption")}
-            icon={<Leaf className="w-3.5 h-3.5" />}
-            label="Vegan options"
-          />
-          <FilterChip
-            active={filters.quiet}
-            onClick={() => toggle("quiet")}
-            icon={<Volume2 className="w-3.5 h-3.5" />}
-            label="Quiet enough to talk"
-          />
         </div>
       </div>
     </div>
   );
 }
 
-function FilterChip({ active, onClick, icon, label }) {
+function RegionPill({ label, count, active, onClick }) {
   return (
     <button
       onClick={onClick}
       className={classNames(
-        "inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition",
+        "shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-sm font-medium transition",
+        active
+          ? "bg-stone-900 text-white border-stone-900"
+          : "bg-white text-stone-700 border-stone-200 hover:border-stone-400"
+      )}
+    >
+      {label}
+      <span
+        className={classNames(
+          "text-[10px] px-1.5 py-0.5 rounded-full",
+          active ? "bg-white/20 text-white" : "bg-stone-100 text-stone-500"
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function CuisineFilters({ cuisines, current, setCurrent, counts }) {
+  return (
+    <div className="max-w-5xl mx-auto px-4 pt-3">
+      <div className="flex flex-wrap gap-1.5">
+        <CuisineChip
+          label="All cuisines"
+          emoji=""
+          count={Object.values(counts).reduce((a, b) => a + b, 0)}
+          active={current === null}
+          onClick={() => setCurrent(null)}
+        />
+        {cuisines.map((c) => (
+          <CuisineChip
+            key={c}
+            label={c}
+            emoji={CUISINES[c]?.emoji || "🍴"}
+            count={counts[c] || 0}
+            active={current === c}
+            onClick={() => setCurrent(c)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CuisineChip({ label, emoji, count, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={classNames(
+        "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs transition",
         active
           ? "bg-amber-600 text-white border-amber-600"
           : "bg-white text-stone-700 border-stone-200 hover:border-stone-400"
       )}
     >
-      {icon}
-      {label}
+      {emoji && <span>{emoji}</span>}
+      <span>{label}</span>
+      <span
+        className={classNames(
+          "text-[10px] ml-0.5",
+          active ? "text-white/70" : "text-stone-400"
+        )}
+      >
+        {count}
+      </span>
     </button>
   );
 }
 
-function PlaceCard({ p }) {
+function SearchAndSort({ query, setQuery, sort, setSort }) {
   return (
-    <article className="bg-white border border-stone-200 rounded-2xl overflow-hidden hover:shadow-md transition group flex flex-col">
-      <div className="aspect-[16/10] bg-gradient-to-br from-amber-50 to-stone-100 overflow-hidden">
-        {p.image ? (
-          <img
-            src={p.image}
-            alt={p.name}
-            className="w-full h-full object-cover group-hover:scale-[1.02] transition"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-stone-400 text-xs">
-            <ShieldCheck className="w-8 h-8 text-amber-300" />
-          </div>
+    <div className="max-w-5xl mx-auto px-4 pt-3 flex gap-2">
+      <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-white border border-stone-200 rounded-full">
+        <Search className="w-4 h-4 text-stone-400 shrink-0" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, neighborhood…"
+          className="flex-1 bg-transparent outline-none text-sm placeholder:text-stone-400 min-w-0"
+        />
+        {query && (
+          <button onClick={() => setQuery("")} aria-label="Clear search">
+            <X className="w-4 h-4 text-stone-400 hover:text-stone-600" />
+          </button>
         )}
       </div>
-      <div className="p-4 flex-1 flex flex-col">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-stone-900 leading-tight text-[15px] truncate">
-              {p.name}
-            </h3>
-            {p.neighborhood ? (
-              <div className="text-xs text-stone-500 flex items-center gap-1 mt-0.5">
-                <MapPin className="w-3 h-3 shrink-0" />
-                <span className="truncate">{p.neighborhood}</span>
-              </div>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1 text-amber-600 text-sm font-medium shrink-0">
-            <Star className="w-4 h-4 fill-amber-500 text-amber-500" />
-            {p.rating.toFixed(1)}
-          </div>
+      <div className="relative">
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="appearance-none pl-9 pr-7 py-2 bg-white border border-stone-200 rounded-full text-xs font-medium text-stone-700 cursor-pointer focus:outline-none focus:border-stone-400"
+        >
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <ArrowUpDown className="w-3.5 h-3.5 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      </div>
+    </div>
+  );
+}
+
+function PlaceCard({ p }) {
+  const cuisine = getCuisine(p);
+  const meta = CUISINES[cuisine] || CUISINES.Other;
+
+  return (
+    <article className="bg-white border border-stone-200 rounded-2xl overflow-hidden flex flex-col group hover:shadow-md hover:-translate-y-0.5 transition-all">
+      <div
+        className={classNames(
+          "h-20 bg-gradient-to-br relative flex items-center justify-center text-4xl",
+          meta.grad
+        )}
+      >
+        <span aria-hidden="true">{meta.emoji}</span>
+        <div className="absolute top-2 right-2 inline-flex items-center gap-0.5 text-amber-700 text-xs font-semibold bg-white/80 backdrop-blur px-2 py-0.5 rounded-full">
+          <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+          {p.rating.toFixed(1)}
+        </div>
+      </div>
+
+      <div className="p-3.5 flex-1 flex flex-col gap-2">
+        <div>
+          <h3 className="font-semibold text-stone-900 leading-snug text-[15px]">
+            {p.name}
+          </h3>
+          {p.neighborhood && (
+            <div className="text-[11px] text-stone-500 flex items-center gap-1 mt-1">
+              <MapPin className="w-3 h-3 shrink-0" />
+              <span className="truncate">{p.neighborhood}</span>
+            </div>
+          )}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
-          <span className="px-2 py-0.5 bg-stone-100 rounded-full">
-            {p.category}
-          </span>
-          {p.priceLevel ? (
-            <span className="px-2 py-0.5 bg-stone-100 rounded-full">
+        <div className="flex flex-wrap items-center gap-1 text-[11px] text-stone-700">
+          <span className="px-1.5 py-0.5 bg-stone-100 rounded">{cuisine}</span>
+          {p.category && p.category !== cuisine && (
+            <span className="px-1.5 py-0.5 bg-stone-50 text-stone-500 rounded">
+              {p.category}
+            </span>
+          )}
+          {p.priceLevel && (
+            <span className="px-1.5 py-0.5 bg-stone-100 rounded font-medium">
               {p.priceLevel}
-            </span>
-          ) : null}
-          {p.listSource ? (
-            <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full">
-              {p.listSource}
-            </span>
-          ) : null}
-        </div>
-
-        {p.giyeonNote ? (
-          <p className="mt-3 text-sm text-stone-700 italic border-l-2 border-amber-300 pl-3">
-            &ldquo;{p.giyeonNote}&rdquo;
-          </p>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-stone-600">
-          {p.filters.dogFriendly && <Tag icon={<Dog className="w-3 h-3" />}>Dogs OK</Tag>}
-          {p.filters.parking && <Tag icon={<Car className="w-3 h-3" />}>Parking</Tag>}
-          {p.filters.veganOption && <Tag icon={<Leaf className="w-3 h-3" />}>Vegan</Tag>}
-        </div>
-
-        <div className="mt-auto pt-4 flex items-center justify-between text-[11px] text-stone-500 border-t border-stone-100">
-          <span className="inline-flex items-center gap-1">
-            {p.visitDate ? (
-              <>
-                <CalendarDays className="w-3 h-3" />
-                Visited {p.visitDate}
-              </>
-            ) : (
-              <span className="text-stone-400">Awaiting note</span>
-            )}
-          </span>
-          {p.sourceUrl ? (
-            <a
-              href={p.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 hover:text-stone-700"
-            >
-              Maps <ExternalLink className="w-3 h-3" />
-            </a>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              <Eye className="w-3 h-3" />
-              {p.analytics.monthlyViews.toLocaleString()} / mo
             </span>
           )}
         </div>
+
+        {p.gayoenNote && (
+          <p className="text-sm text-stone-700 italic border-l-2 border-amber-300 pl-2.5">
+            &ldquo;{p.gayoenNote}&rdquo;
+          </p>
+        )}
+
+        {p.sourceUrl && (
+          <a
+            href={p.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-auto inline-flex items-center justify-center gap-1.5 py-2 text-[12px] font-medium text-stone-700 border-t border-stone-100 -mx-3.5 -mb-3.5 px-3.5 hover:bg-stone-50 transition"
+          >
+            Open in Google Maps
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        )}
       </div>
     </article>
   );
 }
 
-function Tag({ icon, children }) {
+function EmptyState({ onClear }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-stone-100 rounded-full">
-      {icon}
-      {children}
-    </span>
+    <div className="text-center py-16 text-stone-500 text-sm border border-dashed border-stone-300 rounded-2xl mx-4">
+      <div className="text-3xl mb-2">🍽️</div>
+      <div>No matches with the current filters.</div>
+      <button
+        onClick={onClear}
+        className="mt-3 text-xs underline text-stone-700 hover:text-stone-900"
+      >
+        Clear filters
+      </button>
+    </div>
   );
 }
 
-function ListBreakdown({ places }) {
-  const data = useMemo(() => {
-    const counts = {};
-    places.forEach((p) => {
-      const k = p.listSource || "Other";
-      counts[k] = (counts[k] || 0) + 1;
-    });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [places]);
-
+function Footer() {
   return (
-    <section className="max-w-6xl mx-auto px-5 mt-12">
-      <div className="bg-white border border-stone-200 rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-stone-900">List breakdown</h2>
-          <span className="text-xs text-stone-500">
-            {places.length} places across {data.length} curated lists
-          </span>
-        </div>
-        <div style={{ width: "100%", height: 220 }}>
-          <ResponsiveContainer>
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f4" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Bar dataKey="value" fill="#C9A84C" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+    <footer className="border-t border-stone-200 mt-10 py-8 text-center text-[11px] text-stone-500 px-4">
+      <div className="font-medium text-stone-700">TasteTrust · by Gayoen</div>
+      <div className="mt-1 max-w-sm mx-auto">
+        Every restaurant on this list has been personally visited and vetted.
+        No sponsored placements. Data refreshed periodically from Gayoen's
+        Google Maps lists.
       </div>
-    </section>
+    </footer>
   );
 }
 
-// ---------- App ----------
-export default function TasteTrust() {
-  const [query, setQuery] = useState("");
-  const [listFilter, setListFilter] = useState("all");
-  const [filters, setFilters] = useState({
-    dogFriendly: false,
-    parking: false,
-    veganOption: false,
-    quiet: false,
-  });
+// ===== APP =====
 
-  const listOptions = useMemo(() => {
-    const set = new Set();
-    PLACES.forEach((p) => p.listSource && set.add(p.listSource));
-    return [...set];
-  }, []);
+export default function TasteTrust() {
+  const [region, setRegion] = useState(null);
+  const [cuisine, setCuisine] = useState(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("rating");
+
+  const decorated = useMemo(
+    () =>
+      PLACES.map((p) => ({
+        ...p,
+        _region: getRegion(p),
+        _cuisine: getCuisine(p),
+      })),
+    []
+  );
+
+  const regionCounts = useMemo(() => {
+    const c = {};
+    decorated.forEach((p) => {
+      c[p._region] = (c[p._region] || 0) + 1;
+    });
+    return c;
+  }, [decorated]);
+
+  const visibleByRegion = useMemo(
+    () => (region ? decorated.filter((p) => p._region === region) : decorated),
+    [decorated, region]
+  );
+
+  const cuisineCounts = useMemo(() => {
+    const c = {};
+    visibleByRegion.forEach((p) => {
+      c[p._cuisine] = (c[p._cuisine] || 0) + 1;
+    });
+    return c;
+  }, [visibleByRegion]);
+
+  const cuisineOptions = useMemo(() => {
+    const order = Object.keys(CUISINES);
+    return order.filter((c) => cuisineCounts[c]);
+  }, [cuisineCounts]);
+
+  useEffect(() => {
+    if (cuisine && !cuisineCounts[cuisine]) setCuisine(null);
+  }, [cuisine, cuisineCounts]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return PLACES.filter((p) => {
-      if (listFilter !== "all" && p.listSource !== listFilter) return false;
-      if (q) {
-        const blob =
-          `${p.name} ${p.neighborhood} ${p.category} ${p.listSource}`.toLowerCase();
-        if (!blob.includes(q)) return false;
+    let list = visibleByRegion;
+    if (cuisine) list = list.filter((p) => p._cuisine === cuisine);
+    if (q) {
+      list = list.filter((p) =>
+        `${p.name} ${p.neighborhood} ${p.category}`.toLowerCase().includes(q)
+      );
+    }
+    const sorted = [...list].sort((a, b) => {
+      switch (sort) {
+        case "rating":
+          return b.rating - a.rating;
+        case "price-asc":
+          return (
+            (PRICE_TO_NUM[a.priceLevel] || 0) -
+              (PRICE_TO_NUM[b.priceLevel] || 0) || b.rating - a.rating
+          );
+        case "price-desc":
+          return (
+            (PRICE_TO_NUM[b.priceLevel] || 0) -
+              (PRICE_TO_NUM[a.priceLevel] || 0) || b.rating - a.rating
+          );
+        case "name":
+          return a.name.localeCompare(b.name);
+        default:
+          return 0;
       }
-      if (filters.dogFriendly && !p.filters.dogFriendly) return false;
-      if (filters.parking && !p.filters.parking) return false;
-      if (filters.veganOption && !p.filters.veganOption) return false;
-      if (filters.quiet && p.filters.noiseLevel !== "quiet") return false;
-      return true;
     });
-  }, [query, filters, listFilter]);
+    return sorted;
+  }, [visibleByRegion, cuisine, query, sort]);
+
+  const clearAll = () => {
+    setRegion(null);
+    setCuisine(null);
+    setQuery("");
+  };
 
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
+    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans antialiased">
       <Header />
-      <Hero />
-
-      <FilterBar
-        filters={filters}
-        setFilters={setFilters}
+      <CityMap
+        counts={regionCounts}
+        currentRegion={region}
+        setRegion={setRegion}
+      />
+      <RegionTabs
+        regions={REGIONS}
+        current={region}
+        setCurrent={setRegion}
+        counts={regionCounts}
+      />
+      <CuisineFilters
+        cuisines={cuisineOptions}
+        current={cuisine}
+        setCurrent={setCuisine}
+        counts={cuisineCounts}
+      />
+      <SearchAndSort
         query={query}
         setQuery={setQuery}
-        listFilter={listFilter}
-        setListFilter={setListFilter}
-        listOptions={listOptions}
+        sort={sort}
+        setSort={setSort}
       />
 
-      <main id="places" className="max-w-6xl mx-auto px-5 mt-8 pb-16">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-medium text-stone-700">
-            {visible.length} verified place{visible.length === 1 ? "" : "s"}
-            {listFilter !== "all" ? ` · ${listFilter}` : ""}
-          </h2>
-          <span className="text-xs text-stone-500">
-            Updated {new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-          </span>
+      <main className="max-w-5xl mx-auto pt-4 pb-12">
+        <div className="px-4 flex items-baseline justify-between mb-3">
+          <div className="text-xs text-stone-500">
+            <span className="font-medium text-stone-700">{visible.length}</span>{" "}
+            place{visible.length === 1 ? "" : "s"}
+            {region && <span> · {region}</span>}
+            {cuisine && <span> · {cuisine}</span>}
+          </div>
+          {(region || cuisine || query) && (
+            <button
+              onClick={clearAll}
+              className="text-[11px] text-stone-500 hover:text-stone-900 underline"
+            >
+              Clear all
+            </button>
+          )}
         </div>
 
         {visible.length === 0 ? (
-          <div className="text-center py-16 text-stone-500 text-sm border border-dashed border-stone-300 rounded-2xl">
-            No places match the current filters.
-          </div>
+          <EmptyState onClear={clearAll} />
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 px-4">
             {visible.map((p) => (
               <PlaceCard key={p.id} p={p} />
             ))}
@@ -576,15 +792,7 @@ export default function TasteTrust() {
         )}
       </main>
 
-      <ListBreakdown places={PLACES} />
-
-      <footer
-        id="about"
-        className="border-t border-stone-200 mt-10 py-10 text-center text-xs text-stone-500"
-      >
-        TasteTrust · Every restaurant on this list has been personally visited
-        and vetted. No sponsored placements.
-      </footer>
+      <Footer />
     </div>
   );
 }
